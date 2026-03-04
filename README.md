@@ -20,6 +20,7 @@ A browser-based tool for creating interactive infographics — draw clickable zo
   - [Customizing Hoverboxes](#customizing-hoverboxes)
   - [Hoverbox Positioning](#hoverbox-positioning)
   - [HTML/CSS Code Editor](#htmlcss-code-editor)
+  - [Pulse Effect](#pulse-effect)
   - [Zone Visibility](#zone-visibility)
   - [Preview Mode](#preview-mode)
   - [Saving Your Work](#saving-your-work)
@@ -144,6 +145,22 @@ Both the Title and Description fields have three tabs:
 - **Preview** — Renders your HTML live so you can see exactly what it will look like.
 
 This lets you fully control the typography, layout, colors, and formatting of each hoverbox.
+
+### Pulse Effect
+
+Zones can have an animated pulse glow to draw attention and signal interactivity. In the zone editor, under the **Pulse Effect** section:
+
+- Click the **Pulse** toggle to enable/disable the effect.
+- **Color** — The glow color. Use white for a universal shimmer, or match your design palette.
+- **Speed** — How fast the pulse cycles: Slow (3s), Medium (2s), Fast (1s), or Rapid (0.6s).
+- **Intensity** — How bright the glow gets at its peak: Subtle (15%), Medium (30%), Strong (50%), or Bright (70%).
+- A live **preview dot** animates in the modal so you can see the effect before saving.
+
+The pulse is visible in both Edit and Preview modes in the builder, and exports as a pure CSS animation — no JavaScript needed for the effect in the final file. The pulse automatically pauses when the user hovers over the zone (so it doesn't compete with the hoverbox).
+
+Pulse works with all zone types including "No Color" zones — an invisible zone with a pulse creates a subtle glow-from-nothing effect that's great for hint areas.
+
+The sidebar marks pulsing zones with a ✨pulse label.
 
 ### Zone Visibility
 
