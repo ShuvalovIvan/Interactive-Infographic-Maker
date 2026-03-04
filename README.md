@@ -238,6 +238,20 @@ Once your exported infographic is hosted (on GitHub Pages or any web server), em
 </div>
 ```
 
+You can also store it on wordpress itself by adding the html file to `\htdocs\website-name\wp-content\uploads` using File Manager and the src will be 
+```html
+<div style="display: flex; justify-content: center; width: 100%;">
+  <iframe 
+    src=https://website-name.com/wp-content/uploads/infographic.html
+    width="100%" 
+    style="max-width: 900px; border: none; overflow: hidden;" 
+    height="700px" 
+    scrolling="no"
+    title="Interactive Infographic">
+  </iframe>
+</div>
+```
+
 **Tips for WordPress embedding:**
 
 - Adjust `max-width` and `height` to match your infographic's aspect ratio.
