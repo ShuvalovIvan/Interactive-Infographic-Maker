@@ -30,6 +30,7 @@
   .save-dot.saved { background:var(--success); }
   .save-dot.saving { background:#f39c12; }
   .save-dot.unsaved { background:#888; }
+  .storage-badge { font-size:8px; padding:2px 5px; border-radius:3px; background:rgba(255,255,255,.08); color:#666; text-transform:uppercase; letter-spacing:.3px; }
   .mode-indicator { margin-left:auto; padding:4px 10px; border-radius:20px; font-size:10px; font-weight:700; text-transform:uppercase; letter-spacing:.5px; }
   .mode-edit { background:rgba(108,92,231,.25); color:var(--accent2); }
   .mode-preview { background:rgba(46,204,113,.2); color:var(--success); }
@@ -93,12 +94,9 @@
   .field-hint { font-size:9px; color:#666; margin-top:2px; }
   .hb-pos-row { display:flex; gap:8px; align-items:flex-end; margin-top:8px; }
   .hb-pos-row .field { margin-bottom:0; flex:1; }
-  .hb-pos-row .field input { width:100%; }
   .place-btn { padding:5px 10px; font-size:10px; border-radius:4px; cursor:pointer; border:1px solid var(--border); background:transparent; color:var(--text); transition:.15s; align-self:flex-end; white-space:nowrap; }
   .place-btn:hover { border-color:var(--accent); color:#fff; }
-  .place-btn.placing { background:var(--danger); color:#fff; border-color:var(--danger); animation:pulse 1s infinite; }
   @keyframes pulse { 0%,100%{opacity:1}50%{opacity:.6} }
-  .fixed-pin { z-index:80; pointer-events:none; }
 </style>
 </head>
 <body>
@@ -121,6 +119,7 @@
   <button class="btn btn-ghost" id="saveBtn" style="font-size:9px;padding:3px 8px">Autosave</button>
   <button class="btn btn-danger" id="resetBtn" style="font-size:9px;padding:3px 8px">Reset</button>
   <div class="save-status" id="saveStatus"><div class="save-dot unsaved"></div><span>Ready</span></div>
+  <span class="storage-badge" id="storageBadge"></span>
   <div class="mode-indicator mode-edit" id="modeLabel">Edit</div>
 </div>
 <div class="main">
@@ -165,21 +164,102 @@
     <div class="field"><label>Border Radius (px)</label><input type="number" id="mHbRadius" value="10" min="0" max="40"></div>
     <div class="field">
       <label>Hoverbox Position</label>
-      <select id="mHbMode">
-        <option value="follow">Follow cursor</option>
-        <option value="fixed">Fixed position</option>
-      </select>
+      <select id="mHbMode"><option value="follow">Follow cursor</option><option value="fixed">Fixed position</option></select>
       <div class="hb-pos-row" id="fixedPosRow" style="display:none">
         <div class="field"><label>X (px)</label><input type="number" id="mHbX" value="0"></div>
         <div class="field"><label>Y (px)</label><input type="number" id="mHbY" value="0"></div>
         <button class="place-btn" id="placeBtn">Pick on canvas</button>
       </div>
-      <div class="field-hint" id="fixedHint" style="display:none">Coordinates in image pixels. Use "Pick on canvas" to click-place.</div>
+      <div class="field-hint" id="fixedHint" style="display:none">Image-pixel coords. Use "Pick on canvas" to click-place.</div>
     </div>
     <div class="modal-actions"><button class="btn btn-ghost" id="modalCancel">Cancel</button><button class="btn btn-primary" id="modalSave">Save</button></div>
   </div>
 </div>
 <script>
+/* ================================================================
+   UNIVERSAL STORAGE LAYER
+   Priority: Claude window.storage > IndexedDB > localStorage
+   ================================================================ */
+const Storage = (function(){
+  let backend = null; // 'claude' | 'idb' | 'ls'
+  let db = null;
+  const DB_NAME = 'InfographicBuilder';
+  const STORE = 'kv';
+
+  function hasClaudeStorage(){ try { return typeof window.storage==='object'&&typeof window.storage.get==='function'; } catch(e){ return false; } }
+
+  function openIDB(){
+    return new Promise((resolve,reject)=>{
+      try {
+        const req = indexedDB.open(DB_NAME,1);
+        req.onupgradeneeded = e => { e.target.result.createObjectStore(STORE); };
+        req.onsuccess = e => { db=e.target.result; resolve(true); };
+        req.onerror = () => resolve(false);
+      } catch(e){ resolve(false); }
+    });
+  }
+
+  async function init(){
+    if(hasClaudeStorage()){ backend='claude'; }
+    else if(await openIDB()){ backend='idb'; }
+    else { backend='ls'; }
+    return backend;
+  }
+
+  // IndexedDB helpers
+  function idbGet(key){
+    return new Promise((res,rej)=>{
+      const tx=db.transaction(STORE,'readonly');
+      const r=tx.objectStore(STORE).get(key);
+      r.onsuccess=()=>res(r.result!==undefined?{value:r.result}:null);
+      r.onerror=()=>rej(r.error);
+    });
+  }
+  function idbSet(key,val){
+    return new Promise((res,rej)=>{
+      const tx=db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).put(val,key);
+      tx.oncomplete=()=>res({key,value:val});
+      tx.onerror=()=>rej(tx.error);
+    });
+  }
+  function idbDel(key){
+    return new Promise((res,rej)=>{
+      const tx=db.transaction(STORE,'readwrite');
+      tx.objectStore(STORE).delete(key);
+      tx.oncomplete=()=>res({key,deleted:true});
+      tx.onerror=()=>rej(tx.error);
+    });
+  }
+
+  // localStorage helpers
+  function lsGet(key){ const v=localStorage.getItem(key); return v!==null?{value:v}:null; }
+  function lsSet(key,val){ localStorage.setItem(key,val); return {key,value:val}; }
+  function lsDel(key){ localStorage.removeItem(key); return {key,deleted:true}; }
+
+  return {
+    init,
+    getBackend(){ return backend; },
+    async get(key){
+      if(backend==='claude') return await window.storage.get(key);
+      if(backend==='idb') return await idbGet(key);
+      return lsGet(key);
+    },
+    async set(key,val){
+      if(backend==='claude') return await window.storage.set(key,val);
+      if(backend==='idb') return await idbSet(key,val);
+      return lsSet(key,val);
+    },
+    async del(key){
+      if(backend==='claude') return await window.storage.delete(key);
+      if(backend==='idb') return await idbDel(key);
+      return lsDel(key);
+    }
+  };
+})();
+
+/* ================================================================ */
+
 const DRAG_BUF=14,EDGE_BUF=10,AUTOSAVE_MS=1500,OVAL_PTS=32;
 const S={
   img:null,imgW:0,imgH:0,imgSrc:null,zones:[],mode:'edit',shapeTool:'polygon',
@@ -187,7 +267,6 @@ const S={
   selectedZones:new Set(),hoveredZone:null,nextId:1,
   dragging:false,dragZoneId:null,dragPartIdx:-1,dragPtIdx:-1,dragStarted:false,
   moveDrag:false,moveZoneIds:[],moveStartImg:null,moveLastImg:null,moveMoved:false,
-  // hoverbox placement mode
   placing:false,placingZoneId:null,
 };
 const $=s=>document.querySelector(s);
@@ -198,37 +277,51 @@ document.querySelectorAll('.shape-btn').forEach(b=>{b.addEventListener('click',(
 document.querySelectorAll('.tab-bar').forEach(bar=>{bar.querySelectorAll('.tab-btn').forEach(btn=>{btn.addEventListener('click',()=>{const t=btn.dataset.target,p=bar.parentElement;bar.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));btn.classList.add('active');[...bar.querySelectorAll('.tab-btn')].forEach(b=>{const el=p.querySelector('#'+b.dataset.target);if(el)el.style.display=b.dataset.target===t?'':'none';});if(t==='titlePreview')$('#titlePreviewPane').innerHTML=$('#mTitleHtml').value.trim()||'<h3>'+esc($('#mTitle').value||'')+'</h3>';if(t==='descPreview')$('#descPreviewPane').innerHTML=$('#mDescHtml').value.trim()||'<p>'+esc($('#mDesc').value||'')+'</p>';});});});
 let noColorActive=false;
 $('#noColorBtn').addEventListener('click',()=>{noColorActive=!noColorActive;$('#noColorBtn').classList.toggle('active',noColorActive);$('#mColor').disabled=noColorActive;$('#mOpacity').disabled=noColorActive;});
+$('#mHbMode').addEventListener('change',e=>{const f=e.target.value==='fixed';$('#fixedPosRow').style.display=f?'flex':'none';$('#fixedHint').style.display=f?'':'none';});
+$('#placeBtn').addEventListener('click',()=>{if(!editZ)return;$('#modalOverlay').style.display='none';S.placing=true;S.placingZoneId=editZ.id;updI();render();});
 
-// Hoverbox mode toggle
-$('#mHbMode').addEventListener('change',e=>{
-  const fixed=e.target.value==='fixed';
-  $('#fixedPosRow').style.display=fixed?'flex':'none';
-  $('#fixedHint').style.display=fixed?'':'none';
-});
-$('#placeBtn').addEventListener('click',()=>{
-  if(!editZ)return;
-  // minimize modal, enter placement mode
-  $('#modalOverlay').style.display='none';
-  S.placing=true;S.placingZoneId=editZ.id;
-  updI();render();
-});
-
-/* === Helpers === */
 function ensP(z){if(!z.parts){z.parts=z.points?[z.points]:[];delete z.points;}if(z.hbMode===undefined)z.hbMode='follow';if(z.hbX===undefined)z.hbX=0;if(z.hbY===undefined)z.hbY=0;return z;}
 function zP(z){ensP(z);return z.parts;}
 function hexA(a){const v=Math.round(Math.max(0,Math.min(1,a))*255).toString(16);return v.length<2?'0'+v:v;}
 function esc(s){const d=document.createElement('div');d.textContent=s;return d.innerHTML;}
 function totPts(z){return zP(z).reduce((s,p)=>s+p.length,0);}
 function cloneZone(z){return JSON.parse(JSON.stringify(z));}
-function zoneCentroid(z){const pts=zP(z).flat();if(!pts.length)return[0,0];let sx=0,sy=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];});return[Math.round(sx/pts.length),Math.round(sy/pts.length)];}
 
 /* === Save === */
 let autoT=null,saveGen=0;
 function setSS(s,t){const e=$('#saveStatus');e.querySelector('.save-dot').className='save-dot '+s;e.querySelector('span').textContent=t;}
 function markDirty(){setSS('unsaved','Unsaved');clearTimeout(autoT);autoT=setTimeout(()=>savePrj(),AUTOSAVE_MS);}
-async function savePrj(){const g=++saveGen;setSS('saving','Saving...');try{await window.storage.set('ig-zones',JSON.stringify({zones:S.zones,nextId:S.nextId,imgW:S.imgW,imgH:S.imgH}));if(S.imgSrc)await window.storage.set('ig-img',S.imgSrc);if(g===saveGen)setSS('saved','Saved');}catch(e){if(g===saveGen)setSS('unsaved','Failed');}}
-async function loadPrj(){try{const r=await window.storage.get('ig-zones');if(!r){setSS('unsaved','No data');return;}const d=JSON.parse(r.value);S.zones=(d.zones||[]).map(z=>{ensP(z);return z;});S.nextId=d.nextId||1;S.imgW=d.imgW||0;S.imgH=d.imgH||0;try{const ir=await window.storage.get('ig-img');if(ir&&ir.value){const img=new Image();await new Promise((r,j)=>{img.onload=r;img.onerror=j;img.src=ir.value;});S.img=img;S.imgSrc=ir.value;S.imgW=img.width;S.imgH=img.height;$('#dropHint').classList.add('hidden');}}catch(e){}renderList();resize();setSS('saved','Loaded');}catch(e){setSS('unsaved','No data');}}
-async function resetPrj(){try{await window.storage.delete('ig-zones');}catch(e){}try{await window.storage.delete('ig-img');}catch(e){}S.img=null;S.imgSrc=null;S.imgW=0;S.imgH=0;S.zones=[];S.nextId=1;S.selectedZones.clear();S.drawing=false;S.currentPts=[];S.shapeDragging=false;S.placing=false;$('#dropHint').classList.remove('hidden');renderList();updI();resize();setSS('unsaved','Reset');}
+async function savePrj(){
+  const g=++saveGen;setSS('saving','Saving...');
+  try{
+    await Storage.set('ig-zones',JSON.stringify({zones:S.zones,nextId:S.nextId,imgW:S.imgW,imgH:S.imgH}));
+    if(S.imgSrc) await Storage.set('ig-img',S.imgSrc);
+    if(g===saveGen) setSS('saved','Saved');
+  }catch(e){
+    console.error('Save error:',e);
+    if(g===saveGen) setSS('unsaved','Failed');
+  }
+}
+async function loadPrj(){
+  try{
+    const r=await Storage.get('ig-zones');
+    if(!r){setSS('unsaved','No data');return;}
+    const d=JSON.parse(r.value);
+    S.zones=(d.zones||[]).map(z=>{ensP(z);return z;});S.nextId=d.nextId||1;S.imgW=d.imgW||0;S.imgH=d.imgH||0;
+    try{const ir=await Storage.get('ig-img');
+      if(ir&&ir.value){const img=new Image();await new Promise((r,j)=>{img.onload=r;img.onerror=j;img.src=ir.value;});
+        S.img=img;S.imgSrc=ir.value;S.imgW=img.width;S.imgH=img.height;$('#dropHint').classList.add('hidden');}
+    }catch(e){console.warn('Image load skipped');}
+    renderList();resize();setSS('saved','Loaded');
+  }catch(e){setSS('unsaved','No data');}
+}
+async function resetPrj(){
+  try{await Storage.del('ig-zones');}catch(e){}
+  try{await Storage.del('ig-img');}catch(e){}
+  S.img=null;S.imgSrc=null;S.imgW=0;S.imgH=0;S.zones=[];S.nextId=1;S.selectedZones.clear();
+  S.drawing=false;S.currentPts=[];S.shapeDragging=false;S.placing=false;
+  $('#dropHint').classList.remove('hidden');renderList();updI();resize();setSS('unsaved','Reset');
+}
 $('#saveBtn').addEventListener('click',()=>{clearTimeout(autoT);savePrj();});
 $('#resetBtn').addEventListener('click',()=>{const o=document.createElement('div');o.className='confirm-overlay';o.innerHTML='<div class="confirm-box"><p>Delete everything?</p><div class="actions"><button class="btn btn-ghost" id="cN">Cancel</button><button class="btn btn-danger" id="cY">Reset</button></div></div>';document.body.appendChild(o);o.querySelector('#cN').addEventListener('click',()=>o.remove());o.querySelector('#cY').addEventListener('click',()=>{o.remove();resetPrj();});o.addEventListener('click',e=>{if(e.target===o)o.remove();});});
 
@@ -248,7 +341,6 @@ $('#canvasWrap').addEventListener('drop',e=>{e.preventDefault();const f=e.dataTr
 function getScale(){if(!S.img)return{s:1,ox:0,oy:0};const w=drawC.width,h=drawC.height,sc=Math.min(w/S.imgW,h/S.imgH);return{s:sc,ox:(w-S.imgW*sc)/2,oy:(h-S.imgH*sc)/2};}
 function toC(px,py){const{s,ox,oy}=getScale();return[px*s+ox,py*s+oy];}
 function toI(cx,cy){const{s,ox,oy}=getScale();return[(cx-ox)/s,(cy-oy)/s];}
-
 function findPt(cx,cy){let best=null,bd=1e9;const pri=[...S.selectedZones];const order=[...S.zones.filter(z=>pri.includes(z.id)),...S.zones.filter(z=>!pri.includes(z.id))];for(const z of order)for(let pi=0;pi<zP(z).length;pi++)for(let i=0;i<z.parts[pi].length;i++){const[px,py]=toC(...z.parts[pi][i]);const d=Math.hypot(cx-px,cy-py);if(d<DRAG_BUF&&d<bd){bd=d;best={zid:z.id,pi,i};}}return best;}
 function findEdge(cx,cy){if(S.selectedZones.size!==1)return null;const z=S.zones.find(zz=>zz.id===[...S.selectedZones][0]);if(!z)return null;let best=null,bd=1e9;for(let pi=0;pi<zP(z).length;pi++){const pts=z.parts[pi];for(let i=0;i<pts.length;i++){const j=(i+1)%pts.length;const[ax,ay]=toC(...pts[i]),[bx,by]=toC(...pts[j]);const dx=bx-ax,dy=by-ay,l2=dx*dx+dy*dy;if(!l2)continue;let t=((cx-ax)*dx+(cy-ay)*dy)/l2;t=Math.max(0,Math.min(1,t));const px2=ax+t*dx,py2=ay+t*dy,d=Math.hypot(cx-px2,cy-py2);if(d<EDGE_BUF&&d<bd){bd=d;const ip=toI(px2,py2);best={pi,ei:i,pt:[Math.round(ip[0]),Math.round(ip[1])]};}}}return best;}
 function ptInPoly(x,y,pts){let ins=false;for(let i=0,j=pts.length-1;i<pts.length;j=i++){const[xi,yi]=pts[i],[xj,yj]=pts[j];if(((yi>y)!==(yj>y))&&(x<(xj-xi)*(y-yi)/(yj-yi)+xi))ins=!ins;}return ins;}
@@ -277,57 +369,36 @@ function render(){
         ctx.beginPath();ctx.arc(cx2,cy2,rad,0,Math.PI*2);ctx.fillStyle=isD?'#fff':(nc?'#aaa':z.color);ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
       });}
     });
-    // Draw fixed hoverbox pin in edit mode
     if(S.mode==='edit'&&z.hbMode==='fixed'&&sel){
-      const[cx2,cy2]=toC(z.hbX,z.hbY);
-      ctx.save();
-      // pin icon: circle + line
+      const[cx2,cy2]=toC(z.hbX,z.hbY);ctx.save();
       ctx.beginPath();ctx.moveTo(cx2,cy2);ctx.lineTo(cx2,cy2-18);ctx.strokeStyle='#f39c12';ctx.lineWidth=2;ctx.stroke();
       ctx.beginPath();ctx.arc(cx2,cy2-18,6,0,Math.PI*2);ctx.fillStyle='#f39c12';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=1.5;ctx.stroke();
       ctx.beginPath();ctx.arc(cx2,cy2-18,2.5,0,Math.PI*2);ctx.fillStyle='#fff';ctx.fill();
-      // label
-      ctx.font='bold 9px sans-serif';ctx.fillStyle='#f39c12';ctx.textAlign='center';ctx.fillText('HOVERBOX',cx2,cy2+10);
-      ctx.restore();
+      ctx.font='bold 9px sans-serif';ctx.fillStyle='#f39c12';ctx.textAlign='center';ctx.fillText('HOVERBOX',cx2,cy2+10);ctx.restore();
     }
   });
-  // placing mode crosshair
-  if(S.placing){
-    ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#f39c12';ctx.lineWidth=1;
-    ctx.beginPath();ctx.moveTo(0,S._placeY||0);ctx.lineTo(w,S._placeY||0);ctx.stroke();
-    ctx.beginPath();ctx.moveTo(S._placeX||0,0);ctx.lineTo(S._placeX||0,h);ctx.stroke();
-    ctx.setLineDash([]);ctx.restore();
-  }
-  // drawing preview
+  if(S.placing){ctx.save();ctx.setLineDash([4,4]);ctx.strokeStyle='#f39c12';ctx.lineWidth=1;ctx.beginPath();ctx.moveTo(0,S._placeY||0);ctx.lineTo(w,S._placeY||0);ctx.stroke();ctx.beginPath();ctx.moveTo(S._placeX||0,0);ctx.lineTo(S._placeX||0,h);ctx.stroke();ctx.setLineDash([]);ctx.restore();}
   if(S.drawing){
     if(S.shapeTool==='polygon'&&S.currentPts.length){ctx.beginPath();ctx.moveTo(...toC(...S.currentPts[0]));for(let i=1;i<S.currentPts.length;i++)ctx.lineTo(...toC(...S.currentPts[i]));ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.stroke();ctx.setLineDash([]);S.currentPts.forEach(p=>{const[cx2,cy2]=toC(...p);ctx.beginPath();ctx.arc(cx2,cy2,5,0,Math.PI*2);ctx.fillStyle='#6c5ce7';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.stroke();});}
     if((S.shapeTool==='rect'||S.shapeTool==='oval')&&S.shapeStart&&S.shapeEnd){const pts=S.shapeTool==='rect'?makeRect(S.shapeStart,S.shapeEnd):makeOval(S.shapeStart,S.shapeEnd);if(pts.length>1){ctx.beginPath();ctx.moveTo(...toC(...pts[0]));for(let i=1;i<pts.length;i++)ctx.lineTo(...toC(...pts[i]));ctx.closePath();ctx.fillStyle='rgba(108,92,231,0.2)';ctx.fill();ctx.strokeStyle='#fff';ctx.lineWidth=2;ctx.setLineDash([6,4]);ctx.stroke();ctx.setLineDash([]);}}
   }
-  // preview fixed hoverboxes
-  if(S.mode==='preview'&&S.hoveredZone!=null){
-    const z=S.zones.find(zz=>zz.id===S.hoveredZone);
-    if(z&&z.hbMode==='fixed'){
-      const[cx2,cy2]=toC(z.hbX,z.hbY);
-      const hb=$('#hoverbox');
-      hb.style.left=cx2+'px';hb.style.top=cy2+'px';
-    }
-  }
+  if(S.mode==='preview'&&S.hoveredZone!=null){const z=S.zones.find(zz=>zz.id===S.hoveredZone);if(z&&z.hbMode==='fixed'){const[fx,fy]=toC(z.hbX,z.hbY);$('#hoverbox').style.left=fx+'px';$('#hoverbox').style.top=fy+'px';}}
 }
 
 function updI(){
   const el=$('#instructions');
-  if(S.placing){el.style.display='';el.textContent='Click anywhere to place the hoverbox position \u2022 Esc to cancel';return;}
+  if(S.placing){el.style.display='';el.textContent='Click to place hoverbox \u2022 Esc cancel';return;}
   if(S.drawing){el.style.display='';el.textContent=S.shapeTool==='polygon'?'Click to place points \u2022 Dbl-click/Enter close \u2022 Right-click undo \u2022 Esc cancel':'Click+drag to draw '+S.shapeTool+' \u2022 Esc cancel';}
-  else if(S.mode==='edit'&&S.selectedZones.size>=1){el.style.display='';el.textContent='Drag zone to move \u2022 Drag points to reshape \u2022 Dbl-click edge +point \u2022 Right-click point -point \u2022 Shift multi-select \u2022 Ctrl+D dup';}
+  else if(S.mode==='edit'&&S.selectedZones.size>=1){el.style.display='';el.textContent='Drag zone to move \u2022 Drag points reshape \u2022 Dbl-click edge +pt \u2022 Right-click pt -pt \u2022 Shift multi-select \u2022 Ctrl+D dup';}
   else if(S.mode==='edit'){el.style.display='';el.textContent='Click zone to select \u2022 Shift+click multi-select';}
   else el.style.display='none';
 }
 
-/* === Drawing === */
 function startDraw(){if(!S.img)return alert('Upload image first.');S.drawing=true;S.currentPts=[];S.shapeStart=null;S.shapeEnd=null;S.shapeDragging=false;updI();render();}
 function finishPoly(){if(S.currentPts.length<3){cancelDraw();return;}S.drawing=false;createZone([S.currentPts.slice()]);}
 function finishShape(pts){S.drawing=false;S.shapeDragging=false;createZone([pts]);}
-function createZone(parts){const c=zoneCentroidFromParts(parts);const z={id:S.nextId++,title:'Zone '+S.zones.length,desc:'Description...',titleHtml:'',descHtml:'',parts,color:'#6c5ce7',opacity:25,noColor:false,hbBg:'#2a2a3d',hbText:'#ffffff',hbRadius:10,hbMode:'follow',hbX:c[0],hbY:c[1]-30};S.zones.push(z);S.currentPts=[];S.selectedZones.clear();S.selectedZones.add(z.id);renderList();updI();render();markDirty();openModal(z);}
-function zoneCentroidFromParts(parts){const pts=parts.flat();if(!pts.length)return[0,0];let sx=0,sy=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];});return[Math.round(sx/pts.length),Math.round(sy/pts.length)];}
+function createZone(parts){const c=centroid(parts);const z={id:S.nextId++,title:'Zone '+S.zones.length,desc:'Description...',titleHtml:'',descHtml:'',parts,color:'#6c5ce7',opacity:25,noColor:false,hbBg:'#2a2a3d',hbText:'#ffffff',hbRadius:10,hbMode:'follow',hbX:c[0],hbY:c[1]-30};S.zones.push(z);S.currentPts=[];S.selectedZones.clear();S.selectedZones.add(z.id);renderList();updI();render();markDirty();openModal(z);}
+function centroid(parts){const pts=parts.flat();if(!pts.length)return[0,0];let sx=0,sy=0;pts.forEach(p=>{sx+=p[0];sy+=p[1];});return[Math.round(sx/pts.length),Math.round(sy/pts.length)];}
 function cancelDraw(){S.drawing=false;S.currentPts=[];S.shapeDragging=false;S.shapeStart=null;S.shapeEnd=null;updI();render();}
 $('#addZoneBtn').addEventListener('click',()=>{if(S.mode==='edit'&&!S.placing)startDraw();});
 
@@ -337,7 +408,7 @@ function disconnectZone(){if(S.selectedZones.size!==1)return;const z=S.zones.fin
 /* === Mouse === */
 drawC.addEventListener('mousedown',e=>{
   if(S.mode!=='edit'||e.button!==0)return;
-  if(S.placing)return; // handled in click
+  if(S.placing)return;
   if(S.drawing&&S.shapeTool!=='polygon'){const pt=toI(e.offsetX,e.offsetY);S.shapeStart=[Math.round(pt[0]),Math.round(pt[1])];S.shapeEnd=[...S.shapeStart];S.shapeDragging=true;e.preventDefault();return;}
   if(S.drawing)return;
   const hit=findPt(e.offsetX,e.offsetY);
@@ -371,14 +442,11 @@ drawC.addEventListener('mouseup',e=>{
 });
 drawC.addEventListener('click',e=>{
   if(S.mode!=='edit')return;
-  // placement mode
-  if(S.placing){const[ix,iy]=toI(e.offsetX,e.offsetY);const z=S.zones.find(zz=>zz.id===S.placingZoneId);if(z){z.hbX=Math.round(ix);z.hbY=Math.round(iy);}S.placing=false;S.placingZoneId=null;render();markDirty();// reopen modal
-    if(z){$('#mHbX').value=z.hbX;$('#mHbY').value=z.hbY;$('#modalOverlay').style.display='flex';}updI();return;}
+  if(S.placing){const[ix,iy]=toI(e.offsetX,e.offsetY);const z=S.zones.find(zz=>zz.id===S.placingZoneId);if(z){z.hbX=Math.round(ix);z.hbY=Math.round(iy);}S.placing=false;S.placingZoneId=null;render();markDirty();if(z){$('#mHbX').value=z.hbX;$('#mHbY').value=z.hbY;$('#modalOverlay').style.display='flex';}updI();return;}
   if(S.dragging||S.moveDrag)return;
   const near=findPt(e.offsetX,e.offsetY);
   if(S.drawing&&S.shapeTool==='polygon'){if(near)return;const pt=toI(e.offsetX,e.offsetY);S.currentPts.push([Math.round(pt[0]),Math.round(pt[1])]);render();return;}
-  if(S.drawing)return;
-  if(near)return;
+  if(S.drawing)return;if(near)return;
   const hz=hitZone(e.offsetX,e.offsetY);
   if(e.shiftKey){if(hz){if(S.selectedZones.has(hz.id))S.selectedZones.delete(hz.id);else S.selectedZones.add(hz.id);}}
   else{S.selectedZones.clear();if(hz)S.selectedZones.add(hz.id);}
@@ -388,7 +456,7 @@ drawC.addEventListener('dblclick',e=>{if(S.drawing&&S.shapeTool==='polygon'){fin
 drawC.addEventListener('contextmenu',e=>{e.preventDefault();if(S.drawing&&S.shapeTool==='polygon'&&S.currentPts.length){S.currentPts.pop();render();return;}if(S.mode!=='edit'||S.drawing||S.placing)return;const hit=findPt(e.offsetX,e.offsetY);if(hit){const z=S.zones.find(zz=>zz.id===hit.zid);if(z&&z.parts[hit.pi].length>3){z.parts[hit.pi].splice(hit.i,1);render();markDirty();}}});
 drawC.addEventListener('mouseleave',()=>{if(S.dragging){S.dragging=false;S.dragZoneId=null;S.dragPartIdx=-1;S.dragPtIdx=-1;S.dragStarted=false;render();markDirty();}if(S.moveDrag){S.moveDrag=false;S.moveZoneIds=[];render();markDirty();}if(S.shapeDragging&&S.drawing){S.shapeDragging=false;S.shapeStart=null;S.shapeEnd=null;render();}S.hoveredZone=null;$('#hoverbox').classList.remove('visible');if(S.mode==='preview')render();});
 document.addEventListener('keydown',e=>{
-  if(e.key==='Escape'){if(S.placing){S.placing=false;S.placingZoneId=null;const z=editZ;if(z){$('#modalOverlay').style.display='flex';}updI();render();return;}if(S.drawing)cancelDraw();}
+  if(e.key==='Escape'){if(S.placing){S.placing=false;S.placingZoneId=null;if(editZ)$('#modalOverlay').style.display='flex';updI();render();return;}if(S.drawing)cancelDraw();}
   if(e.key==='Enter'&&S.drawing&&S.shapeTool==='polygon')finishPoly();
   if(e.key==='Delete'&&S.mode==='edit'&&S.selectedZones.size&&!S.drawing&&!S.placing){S.zones=S.zones.filter(z=>!S.selectedZones.has(z.id));S.selectedZones.clear();renderList();updI();render();markDirty();}
   if((e.ctrlKey||e.metaKey)&&e.key==='d'&&S.mode==='edit'&&S.selectedZones.size){e.preventDefault();duplicateSelected();}
@@ -424,18 +492,7 @@ function renderList(){
 
 /* === Modal === */
 let editZ=null;
-function openModal(z){
-  editZ=z;$('#mTitle').value=z.title;$('#mDesc').value=z.desc;$('#mTitleHtml').value=z.titleHtml||'';$('#mDescHtml').value=z.descHtml||'';
-  $('#mColor').value=z.color;$('#mOpacity').value=z.opacity;$('#mHbBg').value=z.hbBg;$('#mHbText').value=z.hbText;$('#mHbRadius').value=z.hbRadius;
-  noColorActive=!!z.noColor;$('#noColorBtn').classList.toggle('active',noColorActive);$('#mColor').disabled=noColorActive;$('#mOpacity').disabled=noColorActive;
-  $('#mHbMode').value=z.hbMode||'follow';
-  const fixed=z.hbMode==='fixed';
-  $('#fixedPosRow').style.display=fixed?'flex':'none';$('#fixedHint').style.display=fixed?'':'none';
-  $('#mHbX').value=z.hbX||0;$('#mHbY').value=z.hbY||0;
-  $('#modalTitle').textContent='Edit: '+z.title;
-  document.querySelectorAll('.tab-bar').forEach(bar=>{const btns=bar.querySelectorAll('.tab-btn');btns.forEach((b,i)=>{b.classList.toggle('active',i===0);const t=bar.parentElement.querySelector('#'+b.dataset.target);if(t)t.style.display=i===0?'':'none';});});
-  $('#modalOverlay').style.display='flex';
-}
+function openModal(z){editZ=z;$('#mTitle').value=z.title;$('#mDesc').value=z.desc;$('#mTitleHtml').value=z.titleHtml||'';$('#mDescHtml').value=z.descHtml||'';$('#mColor').value=z.color;$('#mOpacity').value=z.opacity;$('#mHbBg').value=z.hbBg;$('#mHbText').value=z.hbText;$('#mHbRadius').value=z.hbRadius;noColorActive=!!z.noColor;$('#noColorBtn').classList.toggle('active',noColorActive);$('#mColor').disabled=noColorActive;$('#mOpacity').disabled=noColorActive;$('#mHbMode').value=z.hbMode||'follow';const fixed=z.hbMode==='fixed';$('#fixedPosRow').style.display=fixed?'flex':'none';$('#fixedHint').style.display=fixed?'':'none';$('#mHbX').value=z.hbX||0;$('#mHbY').value=z.hbY||0;$('#modalTitle').textContent='Edit: '+z.title;document.querySelectorAll('.tab-bar').forEach(bar=>{const btns=bar.querySelectorAll('.tab-btn');btns.forEach((b,i)=>{b.classList.toggle('active',i===0);const t=bar.parentElement.querySelector('#'+b.dataset.target);if(t)t.style.display=i===0?'':'none';});});$('#modalOverlay').style.display='flex';}
 function closeModal(){$('#modalOverlay').style.display='none';editZ=null;}
 $('#modalCancel').addEventListener('click',closeModal);
 $('#modalOverlay').addEventListener('click',e=>{if(e.target===e.currentTarget)closeModal();});
@@ -478,7 +535,16 @@ el.addEventListener('mouseleave',()=>{hb.classList.remove('show')})});
   const b=new Blob([html],{type:'text/html'});const a=document.createElement('a');a.href=URL.createObjectURL(b);a.download='infographic.html';a.click();
 });
 
-resize();loadPrj();
+/* === INIT: detect storage, then load === */
+async function init(){
+  const backend = await Storage.init();
+  const badge = $('#storageBadge');
+  const labels = { claude:'Claude Storage', idb:'IndexedDB', ls:'localStorage' };
+  badge.textContent = labels[backend] || backend;
+  resize();
+  await loadPrj();
+}
+init();
 </script>
 </body>
 </html>
