@@ -20,6 +20,8 @@ A browser-based tool for creating interactive infographics — draw clickable zo
   - [Customizing Hoverboxes](#customizing-hoverboxes)
   - [Hoverbox Positioning](#hoverbox-positioning)
   - [HTML/CSS Code Editor](#htmlcss-code-editor)
+  - [Pin Markers](#pin-markers)
+  - [Font Customization](#font-customization)
   - [Pulse Effect](#pulse-effect)
   - [Zone Visibility](#zone-visibility)
   - [Preview Mode](#preview-mode)
@@ -145,6 +147,34 @@ Both the Title and Description fields have three tabs:
 - **Preview** — Renders your HTML live so you can see exactly what it will look like.
 
 This lets you fully control the typography, layout, colors, and formatting of each hoverbox.
+
+### Pin Markers
+
+Each zone can have a visual pin marker to draw attention. In the zone editor under "Pin Marker":
+
+- **Toggle** — Enable/disable the pin.
+- **Shape** — Choose from 6 built-in shapes (Map Pin, Dot, Star, Diamond, Ring, Crosshair) or upload a custom image. Shapes are displayed as visual buttons for quick selection.
+- **Color** — Fill color for built-in shapes.
+- **Size** — Slider from 12–60px.
+- **Label** — Optional text (e.g. "A", "1", "!") rendered centered on the pin.
+- **Position** — By default, pins appear at the zone center. You can customize placement three ways:
+  - Enter **X/Y coordinates** manually in image pixels.
+  - Click **Pick** to enter placement mode — a red crosshair follows your cursor. Click anywhere on the canvas to place the pin. Press Esc to cancel.
+  - Click **Center** to snap the pin back to the zone's geometric center.
+
+Pins move with the zone when dragged, offset correctly when duplicated, and export as SVG elements. Custom image pins are embedded as base64 in the export.
+
+### Font Customization
+
+Each zone's hoverbox can use a different font. In the zone editor under "Fonts":
+
+- **Font Family** — Choose from built-in presets (Georgia, Times New Roman, Courier New, Trebuchet MS, Verdana, Impact) or select "Custom / Google Font..." for any font.
+- **Custom font** — When custom is selected, enter any CSS `font-family` string (e.g. `'Poppins', sans-serif`).
+- **Google Fonts URL** — Paste a Google Fonts embed URL. The font loads immediately for preview and is included as a `<link>` tag in the exported HTML.
+- **Title Size / Desc Size** — Separate font size controls for the hoverbox title and description.
+- **Live preview** — A preview strip shows your chosen font in real-time.
+
+The HTML code editor tabs still override everything if you prefer full manual control with inline styles.
 
 ### Pulse Effect
 
