@@ -154,13 +154,13 @@ Zones can have an animated pulse glow to draw attention and signal interactivity
 - **Color** — The glow color. Use white for a universal shimmer, or match your design palette.
 - **Speed** — How fast the pulse cycles: Slow (3s), Medium (2s), Fast (1s), or Rapid (0.6s).
 - **Intensity** — How bright the glow gets at its peak: Subtle (15%), Medium (30%), Strong (50%), or Bright (70%).
-- A live **preview dot** animates in the modal so you can see the effect before saving.
+- A live **preview** animates in the modal showing the actual radial gradient effect, including a zone outline hint so you can see whether the glow is contained or spilling.
 
-The pulse is visible in both Edit and Preview modes in the builder, and exports as a pure CSS animation — no JavaScript needed for the effect in the final file. The pulse automatically pauses when the user hovers over the zone (so it doesn't compete with the hoverbox).
+The pulse is visible in both Edit and Preview modes in the builder, and exports cleanly to the final HTML file. Contained pulses use SVG `<clipPath>` elements to restrict the glow, while spill pulses use unclipped `<circle>` elements that radiate freely. The animation is pure CSS — no JavaScript needed for the effect in the exported file. The pulse automatically pauses when the user hovers over the zone.
 
-Pulse works with all zone types including "No Color" zones — an invisible zone with a pulse creates a subtle glow-from-nothing effect that's great for hint areas.
+Pulse works with all zone types including "No Color" zones — an invisible zone with a contained pulse creates a subtle inner glow, while an invisible zone with spill creates a mysterious floating light effect.
 
-The sidebar marks pulsing zones with a ✨pulse label.
+The sidebar marks pulsing zones with ✨glow or ✨spill.
 
 ### Zone Visibility
 
